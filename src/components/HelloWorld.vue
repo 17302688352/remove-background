@@ -28,7 +28,10 @@
           ref="layerCan",
           :width="canWidth",
           :height="canHeight",
-          @click="pickPoint"
+          @click="pickPoint",
+          @mousedown="pickSelectPoint",
+          @mousemove="pickSelectPoint",
+          @mouseup="pickSelectPoint"
         )
         el-upload.avatar-uploader(
           ref="logoUpload",
@@ -52,6 +55,7 @@
           :disabled="!fromColor"
         ) 替换
         el-color-picker(v-model="toColor", :show-alpha="true")
+        <el-button size="small" type="primary" @click="toggleEraserMode">{{ eraserMode ? '关闭橡皮擦' : '开启橡皮擦' }}</el-button>{{ startX }} {{ startY }}
 
     el-col.trans-box(:xs="24", :sm="24", :md="12", :lg="8", :xl="8")
       canvas#transCan(
@@ -99,6 +103,12 @@ export default {
       loadFileName: "",
       imgStock: [],
       index: 0,
+      eraserMode: false, // 是否开启橡皮擦模式
+      startX: 0, // 鼠标按下时的起始点X坐标
+      startY: 0, // 鼠标按下时的起始点Y坐标
+      endX: 0, // 选中区域结束点X坐标
+      endY: 0, // 选中区域结束点Y坐标
+      selecting: false, // 是否正在选中区域
     };
   },
   computed: {
@@ -139,8 +149,14 @@ export default {
         this.originCtx.drawImage(img, 0, 0);
 
         this.resetImgData();
+        this.transCtx.putImageData(this.imageData, 0, 0);
       }, 0);
     },
+    // 切换橡皮擦模式
+    toggleEraserMode() {
+      this.eraserMode = !this.eraserMode;
+    },
+
     addStock(params) {
       if (this.index) {
         this.imgStock = this.imgStock.slice(this.index);
@@ -214,6 +230,43 @@ export default {
       this.layerCtx.clearRect(0, 0, this.canWidth, this.canHeight);
       this.layerCtx.strokeRect(e.layerX - 3, e.layerY - 3, 6, 6);
     },
+    pickSelectPoint(e) {
+  if (this.eraserMode) {
+    if (e.type === 'mousedown') { // 鼠标按下时记录起始点坐标
+      this.startX = e.layerX;
+      this.startY = e.layerY;
+      this.erasing = true;
+    } else if (e.type === 'mousemove' && this.erasing) { // 鼠标移动时执行擦除操作
+      this.pickSelectArea(e.layerX, e.layerY);
+    } else if (e.type === 'mouseup') { // 鼠标松开时结束擦除操作
+      this.erasing = false;
+    }
+  }
+},
+// 选中区域并处理颜色变化
+  pickSelectArea(x, y) {
+    const radius = 10; // 定义圆形橡皮擦的半径
+    const imageData = this.originCtx.getImageData(x - radius, y - radius, radius * 2, radius * 2); // 获取圆形区域的像素数据
+
+    // 将圆形区域内距离圆心小于半径的像素点颜色设置为透明色
+    for (let j = -radius; j < radius; j++) {
+      for (let i = -radius; i < radius; i++) {
+        const distance = Math.sqrt(i * i + j * j); // 计算像素点到圆心的距离
+        if (distance < radius) {
+          const pixelX = x + i;
+          const pixelY = y + j;
+          const pixelIndex = ((pixelY - (y - radius)) * (radius * 2) + (pixelX - (x - radius))) * 4;
+          imageData.data[pixelIndex + 3] = 0; // 将 alpha 通道设置为 0，表示透明
+        }
+      }
+    }
+
+    // 在原始画布上绘制修改后的图像数据
+    this.originCtx.putImageData(imageData, x - radius, y - radius);
+    // 在右边画布上执行相同的擦除操作
+  const transCtx = this.$refs.transCan.getContext("2d");
+  transCtx.putImageData(imageData, x - radius, y - radius);
+  },
     // 反色
     getOpposite(color) {
       const res = [];
@@ -225,7 +278,8 @@ export default {
     },
     // 相似颜色域
     isSimilar(arr1, arr2) {
-      if (arr1.length !== arr2.length) return false;
+      // 如果 arr1 为 null，则直接返回 false
+  if (!arr1 || arr1.length !== arr2.length) return false;
       for (let i = 0; i < arr1.length; i++) {
         if (Math.abs(arr1[i] - arr2[i]) > 20) {
           return false;
